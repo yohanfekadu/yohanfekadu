@@ -1,0 +1,339 @@
+---
+title: 'MP100 (Bioinformatics): Descriptive Statistics'
+author: "Yohannes Fekadu"
+date: "`r Sys.time()`"
+output:
+  word_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+---
+
+## 1. Data set: (Mainz et al., 2008)
+
+The dataset is stored in the packaged named `breastCancerMAINZ`. 
+Therefore, we need to install the package from **bioconductor** server and load it using `library()` function. 
+
+
+```{r setup, warning=FALSE, message=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+#BiocManager::install("breastCancerMAINZ")
+
+library("breastCancerMAINZ")  
+library(Biobase)
+data(mainz)                    
+mainz
+
+
+```
+
+## 2. Data handling 
+
+The Estrogen receptor (ER) Affy microarray dataset of Mainz et al. (2008) consists
+of 21 phenotypes (i.e., patient level responses and covariates) and 22283 features from 200 patients. 
+
+The patients id is given as: MAINZ_BC6001 MAINZ_BC6002 ... MAINZ_BC6232 (200 total)
+
+To get an overview over the data set:
+
+- *exprs(mainz):* Matrix containing gene expressions as measured by
+Affymetrix hgu133a technology (single-channel, oligonucleotides).
+
+- *fData(mainz):* AnnotatedDataFrame containing annotations of Affy microarray platform hgu133a.
+
+- *pData(mainz):* AnnotatedDataFrame containing Clinical information of the breast
+cancer patients whose tumors were hybridized.
+
+- *experimentalData(mainz):* MIAME object containing information about the dataset.
+
+- *annotation(mainz):* Name of the affy chip.
+
+- mainz@featureData@varMetadata: to access feature data
+- mainz@featureData@data[["Gene.title"]] to do subset using grep() from the gene title column
+
+## 2.1. Accessing gene names
+
+```{r Subseting}
+
+mainz@featureData@data[1:10,2]                  # based on gene title
+mainz@featureData@data[["Gene.title"]][1:10]    #
+
+mainz@featureData@data[1:10,3]                  # based on gene symbol
+mainz@featureData@data[["Gene.symbol"]][1:10]   # 
+
+mainz@featureData@data[1:10,1]                  # based on probe
+mainz@featureData@data[["probe"]][1:10]         # vector of probe id
+
+```
+
+**NB**: Data sub-setting can be done based on the preferred column and/or row.
+Here is a numerical indices are used to do subset gene names.  
+
+## 2.2. Accessing Expression values using `exprs()` slot
+
+```{r}
+
+exprs(mainz)[1:5,1:5]
+mainz@assayData[["exprs"]][1:5,1:5]
+
+```
+**NB**: The expression values can be accessed using the above syntax, `exprs()` is a required. we have a matrix of 22283 x 200 expression values and can be accessed `mainz@assayData[["exprs"]]`.
+
+Let's print the first 5 expression values that correspond that related with line 1050. 
+
+```{r}
+
+exprs(mainz)[1050,1:5]  
+mainz@assayData[["exprs"]][1050,1:5]
+
+```
+
+## 2.3. Grouping variables
+
+In the phenotypic description the following factors have levels for our analysis. 
+
+ - er: Estrogen receptor 
+ - grade: Differentiated, Semi-differentiated and Undifferentiated
+ - e.dmfs:  
+ 
+```{r}
+
+ER.group <- factor(mainz$er,
+                  levels = 0:1,
+                  labels = c("Negative","Postive"))
+
+ER.Postive <- exprs(mainz)[1050,ER.group=="Postive"] 			# Expression values for Negative patients
+ER.group=="Postive"
+
+grade.group <- factor(mainz$grade,
+                     levels = 1:3,
+                     labels = c("Differentiated","Semi-differentiated","Undifferentiated"))
+
+#mainz@phenoData@data[["e.dmfs"]] 
+
+```
+
+## 2.4. Which lines are contain ATP in their gene name "Gene.title"?
+
+I took common term in the gene title column: like *ATP* and *aldo-keto*
+
+```{r}
+ATP <- grep("ATP",mainz@featureData@data[["Gene.title"]]) ## subset with reference to Gene.title
+mainz[ATP,]
+exprs(mainz)[ATP,][1:5, 1:5]                                         # to print exp. values exprs() is required
+
+AK <- grep("aldo-keto",mainz@featureData@data[["Gene.title"]])
+mainz[AK,1:5]
+exprs(mainz)[AK,][1:5,1:5]
+```
+**ATP** found in 265 genes and **aldo-keto** found only 15 genes. 
+
+## 2.5. Average expression value for Negative ER for all genes
+
+```{r}
+
+meanER.N <- apply( 		                  # Apply an function to a matrix
+  exprs(mainz)[,ER.group=="Negative"], 	# Data for Negative patients
+  1, 				                            # Apply to rows: 1 (colums: 2)
+  mean) 			                          # Mean of rows
+
+meanER.P <- apply(
+  exprs(mainz)[,ER.group=="Postive"], 
+  1, 
+  mean)
+
+o <- order(abs(meanER.N - meanER.P), decreasing = T)
+o[1:5]
+
+five.genes <- exprs(mainz)[o[1:5]]
+head(five.genes)
+print(mainz@featureData@data[o[1:5],2])
+## also possible
+#print(mainz@featureData@data[["Gene.title"]][o[1:5]])
+
+
+```
+
+## 2.6. Filtering the Expression data
+
+filtering may improve the estimation by removing extreme expression values
+
+Let's filter the data before proceed the formal analysis.
+
+
+```{r}
+library(genefilter)          # Filtering genes
+
+X <- exprs(mainz)           # The expression data matrix
+ffun <- filterfun (         # Defining filter functions
+  pOverA ( 0.2, 100),       # 20\% of greater as 100
+  cv ( 0.7, 10) )           # CV between 0.7 and 10
+filt <- genefilter(2^X, ffun)  # Apply the filter function, (X are log)
+filtX <- X[filt, ]             # The filtered gene matrices
+mainz.f <- mainz[filt, ]       # Filter the entire object
+
+# re-label the grouping variables based on filtered data
+
+ER.group <- factor(mainz.f$er,
+                  levels = 0:1,
+                  labels = c("Negative","Postive"))
+
+grade.group <- factor(mainz.f$grade,
+                     levels = 1:3,
+                     labels = c("Differentiated","Semi-differentiated","Undifferentiated"))
+
+```
+
+## 2.7. Average gene expression for the filtered data set
+
+```{r}
+meanER.N <- apply(exprs(mainz.f)[, ER.group=="Negative"], 1, mean)
+
+meanER.P <- apply(exprs(mainz.f)[, ER.group=="Postive"], 1, mean)
+
+
+o <- order(abs(meanER.N - meanER.P), decreasing = T)
+
+print(mainz.f@featureData@data[,2][o[1:4]])
+
+```
+
+## 2.8. Quantiles: Location and variation of a sample
+
+```{r}
+d <- exprs(mainz.f)[414 ,ER.group=="Negative"]
+sort (d)
+range (d)
+
+quantile (d,type=2) 	# type=2 uses the definition of quantiles 
+IQR (d,type=2) 		# given above
+
+```
+
+## 2.9. Univariate discriptive statistics: **Stripchart**
+
+```{r}
+exprs(mainz.f)[o[1:4],2]
+
+par ( mfrow=c(2,2) )   	# Divide plot area: 2 rows, 2 columns
+
+for (i in 1:4) {                              # Repeat the following command for each i
+  stripchart ( exprs(mainz.f)[ o[i] , ] ~ ER.group,   	# o[i]th row of mainz grouped
+               method = "jitter", 			      # by patient group
+               main = mainz.f@featureData@data[,2][o[i] ] ,
+               cex.main = 0.8,
+                ylim = c (0,15),
+               ylab = "Gene expression",
+               xlab = "Patient group" ,
+               vertical = TRUE )
+}
+
+```
+
+## 2.10. Box and whisker plot
+
+```{r}
+par ( mfrow=c(2,2) )
+
+for (i in 1:4) {
+  boxplot ( exprs(mainz.f)[ o[i] , ] ~ ER.group,   	# o[i]th row of mainz grouped
+               method = "jitter", 			      # by patient group
+               main = mainz.f@featureData@data[["Gene.title"]][o[i] ] ,
+               cex.main = 0.8,
+               ylim = c (0,15),
+               ylab = "Gene expression",
+               xlab = "Patient group" ,
+               vertical = TRUE )
+}
+```
+
+*we can also make subset for patients group, I took for Differentiated and undifferentiated tumor grades (1,3)*
+just for excercise 
+
+```{r}
+
+mainz.z <- mainz.f[,mainz.f$grade %in% c(1,3)]
+
+#mainz.z$grade <- droplevels(mainz.z$grade)
+
+grade.group1 <- factor(mainz.z$grade,
+                     levels = c(1,3),
+                     labels = c("Differentiated","Undifferentiated"))
+
+mean.Diff <- apply(exprs(mainz.z)[, grade.group1=="Differentiated"], 1, mean)
+
+mean.Undiff <- apply(exprs(mainz.z)[, grade.group1=="Undifferentiated"], 1, mean)
+
+
+
+o1 <- order(abs(mean.Diff - mean.Undiff), decreasing = T)
+
+print(mainz.z@featureData@data[,2][o1[1:4]])
+
+par ( mfrow=c(2,2) )   	# Divide plot area: 2 rows, 2 columns
+
+for (i in 1:4) {                              # Repeat the following command for each i
+  stripchart ( exprs(mainz.z)[ o1[i] , ] ~ grade.group1,   	# o[i]th row of mainz grouped
+               method = "jitter", 			      # by patient group
+               main = mainz.z@featureData@data[,2][o1[i] ] ,
+               cex.main = 0.8,
+                ylim = c (0,15),
+               ylab = "Gene expression",
+               xlab = "Patient grade group" ,
+               vertical = TRUE )
+}
+
+par ( mfrow=c(2,2) )   	# Divide plot area: 2 rows, 2 columns
+
+for (i in 1:4) {                              # Repeat the following command for each i
+  boxplot ( exprs(mainz.z)[ o1[i] , ] ~ grade.group1,   	# o[i]th row of mainz grouped
+               method = "jitter", 			      # by patient group
+               main = mainz.z@featureData@data[,2][o1[i] ] ,
+               cex.main = 0.8,
+                ylim = c (0,15),
+               ylab = "Gene expression",
+               xlab = "Patient grade group" ,
+               vertical = TRUE )
+}
+```
+
+## 2.11. Histogram
+
+```{r}
+par ( mfrow=c(1,2) )
+gene <- 414 
+
+for (grp in c ("Negative","Postive"))
+{
+  hist( exprs(mainz.f)[gene, ER.group==grp],
+        main = paste("Patient group",grp),
+        cex.main = 0.8,
+        xlab = paste("Expression",mainz.f@featureData@data[ gene, 2]),
+        probability=T,
+        ylim=c(0,0.55)
+  )
+
+  mean.ge <- mean(exprs(mainz.f)[gene, ER.group==grp])
+  sdev.ge <- sd (exprs(mainz.f)[gene, ER.group==grp])
+  x <- seq(0,15,0.5)
+
+  lines( x,
+         dnorm(x,mean.ge,sdev.ge),
+         lwd=2)
+
+  text(6,0.5,paste ("mu =", round(mean.ge,2)))
+  text(6,0.45,paste ("sd =", round(sdev.ge,2)))
+}
+
+```
+
+
+
+
